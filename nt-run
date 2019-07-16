@@ -205,31 +205,81 @@ function __get_newman_tests_list {
     unset IFS;
 }
 
+configure_testdata() {
+    newman_group_config_file=${1};
 
-# Migrate clean databse
-flyway_clean_deploy() {
-    # Deploy a fresh DB
-    echo
-    __print_stage_header "Deploy clean database with Flyway...";
-    echo
-    #cd ${DB_PATH};
+    IGNORE_REDIRECTS="";
 
-    export FLYWAY_CLEAN_DISABLED=false;
-    #export FLYWAY_LOCATIONS=filesystem:sql;
+    cd ${NT_DB_TEST_DATA_PATH};
+
     export FLYWAY_LOCATIONS=${NT_FLYWAY_LOCATIONS};
 
-    # Run clean and fresh migration
-    echo "  - Execute Flyway clean..."
-    ${FLYWAY_CMD} -q clean &>/dev/null;
-    __test_command_result $? "Unable to run the flyway migration";
-    __print_stage_success_done;
+    # Read db config - check if we need to clean the database
+    if [[ -e "${newman_group_config_file}" ]] && [[ $(cat ${newman_group_config_file} | jq -c '.database.clean_database_before_running_the_collections_in_this_group' | tr -d '"' | tr '[:upper:]' '[:lower:]') == 'true' ]]; then
+        # Deploy a fresh DB
+        echo
+        __print_stage_header "Clean database with Flyway...";
+        echo
+        #cd ${DB_PATH};
+
+        export FLYWAY_CLEAN_DISABLED=false;
+
+        # Run clean and fresh migration
+        echo "  - Execute Flyway clean..."
+        ${FLYWAY_CMD} -q clean &>/dev/null;
+        __test_command_result $? "Unable to run the flyway clean";
+        __print_stage_success_done;
+    fi
+
+    export FLYWAY_CLEAN_DISABLED=true;
+
+    if [[ -e "${newman_group_config_file}" ]]; then
+        # Read db config and pull out list of db
+        testdata_scripts="$(cat ${newman_group_config_file} | jq -c '.database.test_data[]' | tr -d '"')";
+        if [[ ! -z ${testdata_scripts} ]]; then
+            # Deploy a fresh DB
+            echo
+            __print_stage_header "Updating database with test data using Flyway...";
+            echo
+
+            TMP_MIGRATIONS_PATH=$(tempfile -s _nt-run_migrations)
+            rm $TMP_MIGRATIONS_PATH
+            mkdir $TMP_MIGRATIONS_PATH
+
+            echo "  - Building test-specific migrations in:" $TMP_MIGRATIONS_PATH "..."
+            echo
+
+            # Add our list of schema changes
+            i=1
+            for SQL_FILE in ${testdata_scripts}; do
+                echo "  - Adding '${SQL_FILE}' Test Data..."
+                cp -f ${NT_DB_TEST_DATA_PATH}/${SQL_FILE} ${TMP_MIGRATIONS_PATH}/R__${i}_TEST_DATA_${SQL_FILE};
+                if [[ $? -eq 1 ]]; then
+                    __throw_exception "Unable to find test data - ${SQL_FILE}";
+                fi
+                ((i++))
+            done
+
+            __print_stage_success_done;
+
+            export FLYWAY_LOCATIONS=${NT_FLYWAY_LOCATIONS},filesystem:${TMP_MIGRATIONS_PATH};
+        else
+            # Just migrate DB
+            echo
+            __print_stage_header "Migrating database using Flyway...";
+            echo
+        fi
+    else
+        # Just migrate DB
+        echo
+        __print_stage_header "Migrating database using Flyway...";
+        echo
+    fi
 
     echo "  - Execute Flyway migrate..."
     ${FLYWAY_CMD} -q migrate;
     __test_command_result $? "Unable to run the flyway migration";
     __print_stage_success_done;
-
-    export FLYWAY_CLEAN_DISABLED=true;
 
     # Print out data on the current state of the database
     echo "  - Show current database state..."
@@ -237,74 +287,15 @@ flyway_clean_deploy() {
     __test_command_result $? "Unable to run the flyway info";
     __print_stage_success_done;
 
-    cd ${NEWMAN_TESTS_DIR};
-}
-
-# Migrate test data
-flyway_install_test_data() {
-    # Deploy a fresh DB
-    echo
-    __print_stage_header "Update database with testdata using Flyway...";
-    echo
-    cd ${NT_DB_TEST_DATA_PATH};
-
-    TMP_MIGRATIONS_PATH=$(tempfile -s _nt-run_migrations)
-    rm $TMP_MIGRATIONS_PATH
-    mkdir $TMP_MIGRATIONS_PATH
-
-    echo "  - Building test-specific migrations in:" $TMP_MIGRATIONS_PATH "..."
-    echo
-
-    # Add our list of schema changes
-    i=1
-    for SQL_FILE in ${1}; do
-        echo "  - Adding '${SQL_FILE}' Test Data..."
-        cp -f ${NT_DB_TEST_DATA_PATH}/${SQL_FILE} ${TMP_MIGRATIONS_PATH}/R__${i}_TEST_DATA_${SQL_FILE};
-        if [[ $? -eq 1 ]]; then
-            __throw_exception "Unable to find test data - ${SQL_FILE}";
-        fi
-        ((i++))
-    done
-
-    __print_stage_success_done;
-
-    export FLYWAY_LOCATIONS=${NT_FLYWAY_LOCATIONS},filesystem:${TMP_MIGRATIONS_PATH};
-
-    # Run migration
-    echo "  - Execute Flyway migrate..."
-    ${FLYWAY_CMD} -q migrate;
-    __test_command_result $? "Unable to run the flyway migration";
-    __print_stage_success_done;
-
-    # Print out data on the current state of the database
-    echo "  - Show current database state..."
-    ${FLYWAY_CMD} info;
-    __test_command_result $? "Unable to run the flyway info command";
-    __print_stage_success_done;
-
-    # Cleanup all temp migrations
-    echo "  - Cleaning Up Test Data Migration Files..."
-    echo
-    rm -rfv ${TMP_MIGRATIONS_PATH};
-    __print_stage_success_done;
-
-    cd ${NEWMAN_TESTS_DIR};
-}
-
-configure_testdata() {
-    newman_group_config_file=${1};
-    IGNORE_REDIRECTS="";
-    if [[ -e "${newman_group_config_file}" ]]; then
-        # Read db config - check if we need to clean the database
-        if [[ $(cat ${newman_group_config_file} | jq -c '.database.clean_database_before_running_the_collections_in_this_group' | tr -d '"' | tr '[:upper:]' '[:lower:]') == 'true' ]]; then
-            flyway_clean_deploy;
-        fi
-        # Read db config and pull out list of db
-        testdata_scripts="$(cat ${newman_group_config_file} | jq -c '.database.test_data[]' | tr -d '"')";
-        if [[ ! -z ${testdata_scripts} ]]; then
-            flyway_install_test_data "${testdata_scripts}";
-        fi
+    if ! [ -z "$TMP_MIGRATIONS_PATH" ]; then
+        # Cleanup all temp migrations
+        echo "  - Cleaning Up Test Data Migration Files..."
+        echo
+        rm -rfv ${TMP_MIGRATIONS_PATH};
+        __print_stage_success_done;
     fi
+
+    cd ${NEWMAN_TESTS_DIR};
 }
 
 get_command_args() {
