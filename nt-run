@@ -214,31 +214,22 @@ flyway_clean_deploy() {
     echo
     #cd ${DB_PATH};
 
-    # Disable protection preventing cleaning of whole database
-    echo "  - Allow Flyway to destroy all data..."
     export FLYWAY_CLEAN_DISABLED=false;
-    __print_stage_success_done;
-
-    # Specify location of schemas
-    echo "  - Set default Flyway schema location..."
     #export FLYWAY_LOCATIONS=filesystem:sql;
     export FLYWAY_LOCATIONS=${NT_FLYWAY_LOCATIONS};
-    __print_stage_success_done;
 
     # Run clean and fresh migration
     echo "  - Execute Flyway clean..."
     ${FLYWAY_CMD} -q clean &>/dev/null;
     __test_command_result $? "Unable to run the flyway migration";
     __print_stage_success_done;
+
     echo "  - Execute Flyway migrate..."
     ${FLYWAY_CMD} -q migrate;
     __test_command_result $? "Unable to run the flyway migration";
     __print_stage_success_done;
 
-    # Restore protection preventing cleaning of whole database
-    echo "  - Disable Flyway's ability to destroy all data..."
     export FLYWAY_CLEAN_DISABLED=true;
-    __print_stage_success_done;
 
     # Print out data on the current state of the database
     echo "  - Show current database state..."
@@ -261,25 +252,23 @@ flyway_install_test_data() {
     rm $TMP_MIGRATIONS_PATH
     mkdir $TMP_MIGRATIONS_PATH
 
-    echo "  - Migrations are in:" $TMP_MIGRATIONS_PATH
+    echo "  - Building test-specific migrations in:" $TMP_MIGRATIONS_PATH "..."
     echo
 
     # Add our list of schema changes
     i=1
     for SQL_FILE in ${1}; do
         echo "  - Adding '${SQL_FILE}' Test Data..."
-        echo
         cp -f ${NT_DB_TEST_DATA_PATH}/${SQL_FILE} ${TMP_MIGRATIONS_PATH}/R__${i}_TEST_DATA_${SQL_FILE};
         if [[ $? -eq 1 ]]; then
             __throw_exception "Unable to find test data - ${SQL_FILE}";
         fi
-        __print_stage_success_done;
         ((i++))
     done
-    # Specify location of schema
-    echo "  - Set Flyway schema location to include test data migrations..."
-    export FLYWAY_LOCATIONS=${NT_FLYWAY_LOCATIONS},filesystem:${TMP_MIGRATIONS_PATH};
+
     __print_stage_success_done;
+
+    export FLYWAY_LOCATIONS=${NT_FLYWAY_LOCATIONS},filesystem:${TMP_MIGRATIONS_PATH};
 
     # Run migration
     echo "  - Execute Flyway migrate..."
@@ -297,6 +286,7 @@ flyway_install_test_data() {
     echo "  - Cleaning Up Test Data Migration Files..."
     echo
     rm -rfv ${TMP_MIGRATIONS_PATH};
+    __print_stage_success_done;
 
     cd ${NEWMAN_TESTS_DIR};
 }
