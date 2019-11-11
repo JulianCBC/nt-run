@@ -40,14 +40,12 @@ CREMOVED="\e[1;91m"; # R Light Red (bold)
 CADDED="\e[1;92m"; # A Light Green (bold)
 CNORM="\e[0m";
 
-# Set default reporter
+# Defaults
 REPORTERS="cli";
 IGNORE_REDIRECTS="";
 JUNIT_PATH="";
-
-# Set no exit on fail as default
 EXIT_ON_FAIL="false";
-
+EXIT_AFTER_SETUP=0
 
 # Ensure the newman cli is installed
 if [[ -z $(which newman) ]]; then
@@ -89,6 +87,7 @@ Options:
              --list-groups                              -       List all available newman groups
              --location=<string>                        -       Execute the collection(s) at location. This can be a single collections or a newman group
              --teamcity                                 -       Add teamcity logging to test results
+             --setup                                    -       Perform database setup then exit before running any tests
 
 Examples:
              \"nt-run --all\"                             -       Will execute all tests
@@ -363,6 +362,10 @@ run_single_collection() {
     newman_group_config_file=${dir_name}/newman_group.config.json;
     configure_testdata "${newman_group_config_file}";
 
+    if [ $EXIT_AFTER_SETUP -eq 1 ]; then
+        exit;
+    fi
+
     # Build newman command args
     command_args="$(get_command_args ${newman_group_config_file})";
 
@@ -531,6 +534,9 @@ while [ $# -gt 0 ]; do
         --exit-on-fail)
             EXIT_ON_FAIL="true";
             ;;
+        --setup)
+            EXIT_AFTER_SETUP=1
+            ;;
         --location)
             TEST_LOCATION=${NT_NEWMAN_GROUPS_PATH}/"$2"
             shift
@@ -562,6 +568,10 @@ while [ $# -gt 0 ]; do
 done
 
 if ! [[ -z "$FILTER" ]] || ! [[ -z "$RUN_ALL" ]]; then
+    if [ $EXIT_AFTER_SETUP -eq 1 ]; then
+        __throw_exception "You can only use --setup when running a single test suite."
+    fi
+
     if ! [[ -z "${RUN_ALL}" ]]; then
         FILTER=
     fi
@@ -600,6 +610,10 @@ elif [[ -f ${TEST_LOCATION} ]]; then
     ";
     run_single_collection "${TEST_LOCATION}";
 elif [[ -d ${TEST_LOCATION} ]]; then
+    if [ $EXIT_AFTER_SETUP -eq 1 ]; then
+        __throw_exception "You can only use --setup when running a single test suite."
+    fi
+
     __print_title_header "Running all tests in folder" "
             Folder Location:
                 ${TEST_LOCATION}
