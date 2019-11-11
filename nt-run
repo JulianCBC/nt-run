@@ -376,7 +376,12 @@ run_single_collection() {
     # Execute tests
     echo newman_run "${collection_path}" "${command_args}";
     newman_run "${collection_path}" "${command_args}";
+    res=$?
     echo
+
+    if [[ $res -ne 0 ]]; then
+        exit $res
+    fi
 }
 
 run_collections_in_location() {
